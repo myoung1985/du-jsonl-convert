@@ -1,0 +1,5 @@
+/duconv
+/bin/
+*.test
+*.out
+*.prof
