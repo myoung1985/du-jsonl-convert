@@ -7,6 +7,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Entry mirrors one line of `du -a -b` output: a byte count and a path.
@@ -80,10 +81,45 @@ func parseDuLine(line string) (Entry, error) {
 	if idx < 0 {
 		return Entry{}, fmt.Errorf("no separator between size and path: %q", line)
 	}
-	size, err := strconv.ParseInt(line[:idx], 10, 64)
+	size, err := parseSize(line[:idx])
 	if err != nil {
 		return Entry{}, fmt.Errorf("bad size %q: %w", line[:idx], err)
 	}
 	path := strings.TrimLeft(line[idx+1:], " \t")
 	return Entry{Bytes: size, Path: path}, nil
+}
+
+// sizeUnits maps the single-letter suffixes `du -h` appends to its
+// human-readable sizes to their byte multiplier. du uses binary (1024-based)
+// units, not decimal ones, even though the letters look like SI prefixes.
+var sizeUnits = map[rune]int64{
+	'B': 1,
+	'K': 1 << 10,
+	'M': 1 << 20,
+	'G': 1 << 30,
+	'T': 1 << 40,
+	'P': 1 << 50,
+	'E': 1 << 60,
+}
+
+// parseSize accepts either a plain byte count (from `du -a -b`) or a
+// human-readable size like "4.0K" or "1.5G" (from `du -a -h`). The
+// human-readable form is lossy: du prints one decimal digit, so the
+// resulting byte count is an approximation, not the exact original value.
+func parseSize(s string) (int64, error) {
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return n, nil
+	}
+	if s == "" {
+		return 0, fmt.Errorf("empty size")
+	}
+	unit, ok := sizeUnits[unicode.ToUpper(rune(s[len(s)-1]))]
+	if !ok {
+		return 0, fmt.Errorf("unrecognized unit")
+	}
+	f, err := strconv.ParseFloat(s[:len(s)-1], 64)
+	if err != nil {
+		return 0, fmt.Errorf("bad numeric part: %w", err)
+	}
+	return int64(f * float64(unit)), nil
 }

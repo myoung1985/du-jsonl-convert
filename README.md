@@ -46,8 +46,9 @@ go build -o duconv .
 
 ## Current limitations
 
-- Only byte counts are supported as input (`du -a -b`, not `du -a -h`).
-  Human-readable sizes like "4.0K" are ambiguous to parse back losslessly
-  and aren't handled yet.
+- `du -a -h` input (e.g. "4.0K", "1.5G") is accepted, but converting it to
+  bytes is lossy: du only prints one decimal digit, so the resulting byte
+  count is an approximation of the original size, not an exact match.
+  Prefer `du -a -b` when an exact round trip matters.
 - Paths containing a literal newline break line-based du output; `du -a0`
   (null-separated) input isn't supported yet.
