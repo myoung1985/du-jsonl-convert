@@ -38,6 +38,15 @@ duconv -from jsonl -to du -in usage.jsonl -out usage.du
 By default input is read from stdin and output written to stdout; `-in` and
 `-out` accept a file path or `-` for a stream.
 
+Paths containing a literal newline break line-based du output. `du -a0`
+writes NUL-terminated records instead of newline-terminated ones to avoid
+that ambiguity; pass `-null` to read or write that form:
+
+```
+du -a0 -b / 2>/dev/null | duconv -from du -to jsonl -null > usage.jsonl
+duconv -from jsonl -to du -null -in usage.jsonl -out usage.du
+```
+
 ## Building
 
 ```
@@ -50,5 +59,3 @@ go build -o duconv .
   bytes is lossy: du only prints one decimal digit, so the resulting byte
   count is an approximation of the original size, not an exact match.
   Prefer `du -a -b` when an exact round trip matters.
-- Paths containing a literal newline break line-based du output; `du -a0`
-  (null-separated) input isn't supported yet.

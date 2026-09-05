@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,38 +22,70 @@ type Entry struct {
 // scanner's buffer without limit.
 const maxDuLine = 1 << 20
 
-// DuToJSONL reads du's "<bytes>\t<path>" lines from r and writes one JSON
-// object per line to w. It processes a line at a time, so the size of the
+// DuToJSONL reads du's "<bytes>\t<path>" records from r and writes one JSON
+// object per line to w. It processes a record at a time, so the size of the
 // input has no bearing on memory use.
-func DuToJSONL(r io.Reader, w io.Writer) error {
+//
+// If nullDelim is true, records are read up to a NUL byte instead of a
+// newline, matching `du -a0` output. That lets a path containing a literal
+// newline pass through intact, since only NUL terminates a record.
+func DuToJSONL(r io.Reader, w io.Writer, nullDelim bool) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), maxDuLine)
+	if nullDelim {
+		sc.Split(scanNullDelim)
+	}
 
 	enc := json.NewEncoder(w)
-	lineNum := 0
+	recordNum := 0
 	for sc.Scan() {
-		lineNum++
+		recordNum++
 		line := sc.Text()
 		if line == "" {
 			continue
 		}
 		e, err := parseDuLine(line)
 		if err != nil {
-			return fmt.Errorf("line %d: %w", lineNum, err)
+			return fmt.Errorf("record %d: %w", recordNum, err)
 		}
 		if err := enc.Encode(e); err != nil {
-			return fmt.Errorf("line %d: writing json: %w", lineNum, err)
+			return fmt.Errorf("record %d: writing json: %w", recordNum, err)
 		}
 	}
 	return sc.Err()
 }
 
+// scanNullDelim is a bufio.SplitFunc that splits on a NUL byte instead of
+// a newline, mirroring bufio.ScanLines. du writes NUL-terminated records
+// with the -0 flag so paths containing a literal newline are unambiguous.
+func scanNullDelim(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	if i := bytes.IndexByte(data, 0); i >= 0 {
+		return i + 1, data[:i], nil
+	}
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
+}
+
 // JSONLToDu reads one JSON entry per line from r and writes du-style
-// "<bytes>\t<path>" lines to w, decoding one object at a time.
-func JSONLToDu(r io.Reader, w io.Writer) error {
+// "<bytes>\t<path>" records to w, decoding one object at a time.
+//
+// If nullDelim is true, each record is terminated with a NUL byte instead
+// of a newline, so a path containing a literal newline round-trips back to
+// a form `du -a0`-style consumers expect.
+func JSONLToDu(r io.Reader, w io.Writer, nullDelim bool) error {
 	dec := json.NewDecoder(r)
 	bw := bufio.NewWriter(w)
 	defer bw.Flush()
+
+	term := "\n"
+	if nullDelim {
+		term = "\x00"
+	}
 
 	for {
 		var e Entry
@@ -63,7 +96,7 @@ func JSONLToDu(r io.Reader, w io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("decoding json: %w", err)
 		}
-		if _, err := fmt.Fprintf(bw, "%d\t%s\n", e.Bytes, e.Path); err != nil {
+		if _, err := fmt.Fprintf(bw, "%d\t%s%s", e.Bytes, e.Path, term); err != nil {
 			return err
 		}
 	}

@@ -23,6 +23,7 @@ func run(args []string) error {
 	to := fs.String("to", "", "output format: du or jsonl")
 	in := fs.String("in", "-", "input file, - for stdin")
 	out := fs.String("out", "-", "output file, - for stdout")
+	null := fs.Bool("null", false, "use NUL instead of newline to separate du records (matches `du -a0`); needed for paths containing a literal newline")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -41,9 +42,9 @@ func run(args []string) error {
 
 	switch {
 	case *from == "du" && *to == "jsonl":
-		return DuToJSONL(r, w)
+		return DuToJSONL(r, w, *null)
 	case *from == "jsonl" && *to == "du":
-		return JSONLToDu(r, w)
+		return JSONLToDu(r, w, *null)
 	case *from == "" || *to == "":
 		return fmt.Errorf("both -from and -to are required (du or jsonl)")
 	case *from == *to:
